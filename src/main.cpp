@@ -1,65 +1,96 @@
-// #include <WiFi.h>
-// #include <esp_wifi.h>
-
-// //código para descobrir o MAC do ESP32
-// void readMacAddress(){
-//   uint8_t baseMac[6];
-//   esp_err_t ret = esp_wifi_get_mac(WIFI_IF_STA, baseMac);
-//   if (ret == ESP_OK) {
-//     Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
-//                   baseMac[0], baseMac[1], baseMac[2],
-//                   baseMac[3], baseMac[4], baseMac[5]);
-//   } else {
-//     Serial.println("Failed to read MAC address");
-//   }
-// }
-
-// void setup(){
-//   Serial.begin(115200);
-
-//   WiFi.mode(WIFI_STA);
-//   WiFi.begin();
-
-//   Serial.print("[DEFAULT] ESP32 Board MAC Address: ");
-//   readMacAddress();
-// }
- 
-// void loop(){
-
-// }
-
-
-#include <esp_now.h>
+#include <Arduino.h>
 #include <WiFi.h>
+#include <WebSocketsClient.h>
 
-int buzzerPin = 21;
+#define SSID_ESP "GAS-LEAK-SENSOR:200"
+#define PASSWORD "" // Senha vazia
 
-// Callback function that will be executed when data is received
-void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-    int command;
-    memcpy(&command, incomingData, sizeof(command));
-    Serial.print("Command received: ");
-    Serial.println(command);
-    
-    if (command == 1) {
-        digitalWrite(buzzerPin, HIGH);
-        delay(2000);
-        digitalWrite(buzzerPin, LOW);
+#define LED_PIN 2
+#define BUZZER_PIN 23
+
+WebSocketsClient webSocket;
+
+// Controle do alarme
+void alarmON()
+{
+    digitalWrite(LED_PIN, HIGH);
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(5000);
+}
+
+void alarmOFF()
+{
+    digitalWrite(LED_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
+}
+
+// Lidar com mensagens recebidas do WebSocket
+void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
+{
+    switch (type)
+    {
+    case WStype_CONNECTED:
+        Serial.println("✅ Conectado ao WebSocket Server!");
+        webSocket.sendTXT("ESP32 conectado!");
+        break;
+
+    case WStype_TEXT:
+        Serial.printf("📩 Mensagem recebida: %s\n", payload);
+
+        if (strcmp((char *)payload, "on") == 0)
+        {
+            alarmON();
+        }
+        else if (strcmp((char *)payload, "off") == 0)
+        {
+            alarmOFF();
+        }
+        break;
+
+    case WStype_DISCONNECTED:
+        Serial.println("❌ Desconectado do WebSocket Server! Tentando reconectar...");
+        break;
     }
 }
 
-void setup() {
-    Serial.begin(115200);
-    pinMode(buzzerPin, OUTPUT);
+// Conectar-se ao Wi-Fi
+void connectWiFi()
+{
     WiFi.mode(WIFI_STA);
+    WiFi.begin(SSID_ESP, PASSWORD);
 
-    if (esp_now_init() != ESP_OK) {
-        Serial.println("Error initializing ESP-NOW");
-        return;
+    Serial.print("🔄 Conectando-se ao Wi-Fi...");
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.print(".");
+        delay(1000);
     }
-    esp_now_register_recv_cb(OnDataRecv);
+
+    Serial.println("\n✅ Conectado ao Wi-Fi!");
+    Serial.print("📡 IP: ");
+    Serial.println(WiFi.localIP());
 }
 
-void loop() {
+// Inicializar WebSocket Client
+void initWebSocket()
+{
+    webSocket.begin("192.168.4.200", 81, "/");
+    webSocket.onEvent(webSocketEvent);
+    webSocket.setReconnectInterval(5000); // Tenta reconectar a cada 5 segundos
+}
 
+void setup()
+{
+    Serial.begin(115200);
+    pinMode(LED_PIN, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
+    alarmOFF(); // Garante que o alarme comece desligado
+
+    connectWiFi();
+    initWebSocket();
+}
+
+void loop()
+{
+    webSocket.loop();
 }
